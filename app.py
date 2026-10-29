@@ -9,6 +9,10 @@ def get_stock_data(ticker: str = "MSFT", period: str = "5y"):
     data = yf.download(ticker, period=period, auto_adjust=True, progress=False)
     if data.empty:
         raise ValueError(f"No data returned for ticker: {ticker}")
+
+    if isinstance(data.columns, pd.MultiIndex):
+        data = data.droplevel("Ticker", axis=1)
+
     return data
 
 
@@ -25,16 +29,19 @@ def implement_strategy(data: pd.DataFrame, holding_days: int = 60, profit_target
     buy_price = 0.0
     buy_date = None
 
-    for date, row in data.iterrows():
-        ma50 = row.get("MA50")
-        ma200 = row.get("MA200")
+    for date in data.index:
+        if "MA50" not in data.columns or "MA200" not in data.columns:
+            continue
+
+        ma50 = data.at[date, "MA50"]
+        ma200 = data.at[date, "MA200"]
 
         if pd.isna(ma50) or pd.isna(ma200):
             continue
 
         if not in_position and ma50 > ma200:
             in_position = True
-            buy_price = float(row["Close"])
+            buy_price = float(data.at[date, "Close"])
             buy_date = date
             positions.append(
                 {
@@ -47,7 +54,7 @@ def implement_strategy(data: pd.DataFrame, holding_days: int = 60, profit_target
                 }
             )
         elif in_position:
-            current_price = float(row["Close"])
+            current_price = float(data.at[date, "Close"])
             days_held = (date - buy_date).days
             profit_pct = (current_price - buy_price) / buy_price
 
@@ -63,34 +70,39 @@ def implement_strategy(data: pd.DataFrame, holding_days: int = 60, profit_target
     return pd.DataFrame(positions)
 
 
-st.set_page_config(page_title="MSFT Trading App", layout="wide")
-st.title("MSFT Price Chart with Moving Averages and Trades")
+def main():
+    st.set_page_config(page_title="MSFT Trading App", layout="wide")
+    st.title("MSFT Price Chart with Moving Averages and Trades")
 
-try:
-    df = get_stock_data("MSFT", "5y")
-    df = calculate_moving_averages(df)
-    trades = implement_strategy(df)
-except Exception as e:
-    st.error(f"Failed to load data: {e}")
-    st.stop()
+    try:
+        df = get_stock_data("MSFT", "5y")
+        df = calculate_moving_averages(df)
+        trades = implement_strategy(df)
+    except Exception as e:
+        st.error(f"Failed to load data: {e}")
+        st.stop()
 
-fig, ax = plt.subplots(figsize=(12, 6))
-ax.plot(df.index, df["Close"], label="Close Price", alpha=0.5, color="gray")
-ax.plot(df.index, df["MA50"], label="MA50", color="blue", linewidth=1.5)
-ax.plot(df.index, df["MA200"], label="MA200", color="red", linewidth=1.5)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(df.index, df["Close"], label="Close Price", alpha=0.5, color="gray")
+    ax.plot(df.index, df["MA50"], label="MA50", color="blue", linewidth=1.5)
+    ax.plot(df.index, df["MA200"], label="MA200", color="red", linewidth=1.5)
 
-if not trades.empty:
-    ax.scatter(trades["BuyDate"], trades["BuyPrice"], marker="^", color="green", s=80, label="Buy Point", zorder=5)
-    sell_trades = trades.dropna(subset=["SellDate"])
-    if not sell_trades.empty:
-        ax.scatter(sell_trades["SellDate"], sell_trades["SellPrice"], marker="v", color="red", s=80, label="Sell Point", zorder=5)
+    if not trades.empty:
+        ax.scatter(trades["BuyDate"], trades["BuyPrice"], marker="^", color="green", s=80, label="Buy Point", zorder=5)
+        sell_trades = trades.dropna(subset=["SellDate"])
+        if not sell_trades.empty:
+            ax.scatter(sell_trades["SellDate"], sell_trades["SellPrice"], marker="v", color="red", s=80, label="Sell Point", zorder=5)
 
-ax.legend()
-ax.grid(True, alpha=0.3)
-st.pyplot(fig)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    st.pyplot(fig)
 
-st.subheader("Detailed Trades")
-if trades.empty:
-    st.info("No trades were generated for the selected period.")
-else:
-    st.dataframe(trades, use_container_width=True)
+    st.subheader("Detailed Trades")
+    if trades.empty:
+        st.info("No trades were generated for the selected period.")
+    else:
+        st.dataframe(trades, use_container_width=True)
+
+
+if __name__ == "__main__":
+    main()
